@@ -71,6 +71,129 @@ POST /checkout
 - `app/models/order.rb` e `db/migrate/*_create_orders.rb`
   - Persistência para gerar spans de DB
 
+## Trechos reais de código (copiar e adaptar)
+
+### 1) Gemfile (dependências de tracing)
+
+```ruby
+gem "opentelemetry-api", "1.7.0"
+gem "opentelemetry-sdk", "1.10.0"
+gem "opentelemetry-exporter-otlp", "0.31.1"
+gem "opentelemetry-instrumentation-rails", "0.39.1"
+gem "opentelemetry-instrumentation-net_http", "0.27.0"
+```
+
+### 2) Initializer do OpenTelemetry
+
+```ruby
+# config/initializers/opentelemetry.rb
+require "opentelemetry/sdk"
+require "opentelemetry/exporter/otlp"
+require "opentelemetry/instrumentation/rails"
+require "opentelemetry/instrumentation/net/http"
+
+otel_headers = ENV["OTEL_EXPORTER_OTLP_HEADERS"]
+otel_headers = {} if otel_headers.nil? || otel_headers.strip.empty?
+
+exporter = OpenTelemetry::Exporter::OTLP::Exporter.new(
+  endpoint: ENV.fetch("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://localhost:4318/v1/traces"),
+  headers: otel_headers
+)
+
+resource = OpenTelemetry::SDK::Resources::Resource.create(
+  "deployment.environment" => ENV.fetch("OTEL_DEPLOYMENT_ENVIRONMENT", Rails.env.to_s)
+)
+
+OpenTelemetry::SDK.configure do |c|
+  c.service_name = ENV.fetch("OTEL_SERVICE_NAME", "ruby-rails-traces-demo")
+  c.resource = resource
+  c.add_span_processor(OpenTelemetry::SDK::Trace::Export::BatchSpanProcessor.new(exporter))
+
+  c.use "OpenTelemetry::Instrumentation::Rails"
+  c.use "OpenTelemetry::Instrumentation::Net::HTTP"
+end
+```
+
+### 3) Span manual no controller (incluindo erro e trace_id)
+
+```ruby
+# app/controllers/checkout_controller.rb
+TRACER = OpenTelemetry.tracer_provider.tracer("checkout-controller", "1.0.0")
+
+def create
+  TRACER.in_span("checkout.request") do |span|
+    order = CheckoutService.new(
+      customer_id: checkout_params.fetch(:customer_id),
+      amount_cents: checkout_params.fetch(:amount_cents),
+      force_error: checkout_params.fetch(:force_error),
+      internal_url: internal_ping_url
+    ).call
+
+    render json: {
+      order_id: order.id,
+      status: order.status,
+      trace_id: current_trace_id
+    }, status: :ok
+  rescue ActionController::ParameterMissing => e
+    span.record_exception(e)
+    span.status = OpenTelemetry::Trace::Status.error(e.message)
+    render json: { error: e.message, trace_id: current_trace_id }, status: :unprocessable_entity
+  rescue CheckoutService::CheckoutError => e
+    span.record_exception(e)
+    span.status = OpenTelemetry::Trace::Status.error(e.message)
+    render json: { error: e.message, trace_id: current_trace_id }, status: :internal_server_error
+  end
+end
+```
+
+### 4) Spans manuais por etapa no service object
+
+```ruby
+# app/services/checkout_service.rb
+TRACER = OpenTelemetry.tracer_provider.tracer("checkout-service", "1.0.0")
+
+def call
+  valid_amount = with_span("checkout.validate_input") { validate_input! }
+  order = with_span("checkout.persist_order") { persist_order!(valid_amount) }
+  with_span("checkout.call_internal_service") { call_internal_service! }
+  with_span("checkout.finalize") { finalize_order!(order) }
+  order
+end
+
+def with_span(name, attributes = {})
+  TRACER.in_span(name, attributes: attributes) do |span|
+    yield
+  rescue StandardError => e
+    span.record_exception(e)
+    span.status = OpenTelemetry::Trace::Status.error(e.message)
+    raise
+  end
+end
+```
+
+### 5) Chamada HTTP de saída (gera span client)
+
+```ruby
+def call_internal_service!
+  uri = URI.parse(@internal_url)
+  response = Net::HTTP.get_response(uri)
+  return response if response.code.to_i.between?(200, 299)
+
+  raise CheckoutError, "internal ping failed with status #{response.code}"
+end
+```
+
+### 6) Rotas mínimas da demo
+
+```ruby
+# config/routes.rb
+Rails.application.routes.draw do
+  get "health", to: "health#show"
+  get "internal/ping", to: "internal#ping"
+  post "checkout", to: "checkout#create"
+end
+```
+
 ## Endpoints da demo
 
 - `GET /health`
