@@ -11,7 +11,7 @@ gem "opentelemetry-api", "1.7.0"
 gem "opentelemetry-sdk", "1.10.0"
 gem "opentelemetry-exporter-otlp", "0.31.1"
 gem "opentelemetry-instrumentation-rails", "0.39.1"
-gem "opentelemetry-instrumentation-net_http", "0.27.0"
+gem "opentelemetry-instrumentation-net_http", "0.28.0"
 
 # Windows does not include zoneinfo files, so bundle the tzinfo-data gem
 gem "tzinfo-data", platforms: %i[ windows jruby ]

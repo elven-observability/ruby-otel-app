@@ -211,7 +211,7 @@ GEM
       opentelemetry-registry (~> 0.1)
     opentelemetry-instrumentation-concurrent_ruby (0.24.0)
       opentelemetry-instrumentation-base (~> 0.25)
-    opentelemetry-instrumentation-net_http (0.27.0)
+    opentelemetry-instrumentation-net_http (0.28.0)
       opentelemetry-instrumentation-base (~> 0.25)
     opentelemetry-instrumentation-rack (0.29.0)
       opentelemetry-instrumentation-base (~> 0.25)
@@ -369,7 +369,7 @@ DEPENDENCIES
   debug
   opentelemetry-api (= 1.7.0)
   opentelemetry-exporter-otlp (= 0.31.1)
-  opentelemetry-instrumentation-net_http (= 0.27.0)
+  opentelemetry-instrumentation-net_http (= 0.28.0)
   opentelemetry-instrumentation-rails (= 0.39.1)
   opentelemetry-sdk (= 1.10.0)
   pg (= 1.6.3)
