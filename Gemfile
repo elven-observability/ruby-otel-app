@@ -8,7 +8,7 @@ gem "pg", "1.6.3"
 gem "puma", ">= 5.0"
 
 gem "opentelemetry-api", "1.7.0"
-gem "opentelemetry-sdk", "1.10.0"
+gem "opentelemetry-sdk", "1.11.0"
 gem "opentelemetry-exporter-otlp", "0.31.1"
 gem "opentelemetry-instrumentation-rails", "0.39.1"
 gem "opentelemetry-instrumentation-net_http", "0.27.0"
