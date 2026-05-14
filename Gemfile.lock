@@ -181,7 +181,8 @@ GEM
       racc (~> 1.4)
     nokogiri (1.19.1-x86_64-linux-musl)
       racc (~> 1.4)
-    opentelemetry-api (1.7.0)
+    opentelemetry-api (1.10.0)
+      logger
     opentelemetry-common (0.23.0)
       opentelemetry-api (~> 1.0)
     opentelemetry-exporter-otlp (0.31.1)
@@ -367,7 +368,7 @@ DEPENDENCIES
   brakeman
   bundler-audit
   debug
-  opentelemetry-api (= 1.7.0)
+  opentelemetry-api (= 1.10.0)
   opentelemetry-exporter-otlp (= 0.31.1)
   opentelemetry-instrumentation-net_http (= 0.27.0)
   opentelemetry-instrumentation-rails (= 0.39.1)
