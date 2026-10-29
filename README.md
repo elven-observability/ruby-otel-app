@@ -312,7 +312,9 @@ No fluxo saudável:
 No fluxo com erro:
 
 1. Span `checkout.finalize` com status de erro.
-2. Exceção registrada no span (`record_exception`).
+2. A chamada `record_exception` pode existir na aplicação, mas o exporter de
+   privacidade desta referência remove eventos, links e descrições de erro
+   antes da exportação. Não espere a mensagem ou stacktrace bruta no backend.
 3. Mesmo `trace_id` disponível na resposta da API.
 
 ## Passo a passo para instrumentar uma app Ruby real
