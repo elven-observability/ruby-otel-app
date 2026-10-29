@@ -9,6 +9,7 @@ gem "puma", "~> 7.2"
 
 gem "opentelemetry-api", "1.11.1"
 gem "opentelemetry-sdk", "1.13.1"
+# Private retry hook: any exporter upgrade must update the guard and regressions.
 gem "opentelemetry-exporter-otlp", "0.37.0"
 gem "opentelemetry-instrumentation-rails", "0.42.0"
 gem "opentelemetry-instrumentation-net_http", "0.29.2"

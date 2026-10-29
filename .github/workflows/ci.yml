@@ -5,6 +5,9 @@ on:
   push:
     branches: [ main ]
 
+env:
+  BUNDLE_FROZEN: "true"
+
 jobs:
   scan_ruby:
     runs-on: ubuntu-latest

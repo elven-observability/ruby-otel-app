@@ -4,7 +4,10 @@ require "minitest/autorun"
 require "socket"
 require "json"
 require "timeout"
+require "opentelemetry/sdk"
+require "opentelemetry/exporter/otlp"
 require_relative "../lib/reference_telemetry"
+require_relative "../lib/reference_telemetry/exporter"
 
 class ReferenceTelemetryTest < Minitest::Test
   def setup
@@ -139,6 +142,49 @@ class ReferenceTelemetryTest < Minitest::Test
     ReferenceTelemetry.shutdown
     assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 5
     assert_equal 1, @requests
+  end
+
+  def test_exporter_pin_and_upstream_hook_contract
+    dependency = Bundler.definition.dependencies.find { |item| item.name == "opentelemetry-exporter-otlp" }
+    assert_equal Gem::Requirement.new("= 0.37.0"), dependency.requirement
+    locked = Bundler.locked_gems.specs.find { |item| item.name == "opentelemetry-exporter-otlp" }
+    assert_equal "0.37.0", locked.version.to_s
+    assert_equal "0.37.0", Gem.loaded_specs.fetch("opentelemetry-exporter-otlp").version.to_s
+    assert_nil ReferenceTelemetry::Exporter.validate_upstream!
+  end
+
+  def test_unsupported_exporter_version_is_rejected
+    assert_raises(ArgumentError) do
+      ReferenceTelemetry::Exporter.validate_upstream!(version: Gem::Version.new("0.38.0"))
+    end
+  end
+
+  def test_changed_private_hook_signature_is_rejected
+    incompatible = Class.new do
+      private
+
+      def backoff?(**)
+        false
+      end
+    end
+    assert_raises(ArgumentError) do
+      ReferenceTelemetry::Exporter.validate_upstream!(exporter: incompatible)
+    end
+  end
+
+  def test_contract_guard_failure_disables_telemetry_without_network
+    original = ReferenceTelemetry::Exporter.method(:validate_upstream!)
+    singleton = ReferenceTelemetry::Exporter.singleton_class
+    singleton.define_method(:validate_upstream!) do |**|
+      original.call(version: Gem::Version.new("0.38.0"))
+    end
+    assert_raises(ArgumentError) { ReferenceTelemetry::Exporter.new }
+    _out, error = capture_io { refute ReferenceTelemetry.start }
+    assert_includes error, "application continues"
+    refute OpenTelemetry::Trace.current_span.recording?
+    assert_equal 0, @requests
+  ensure
+    singleton.define_method(:validate_upstream!, original) if original
   end
 
   def test_fork_restarts_processor_and_preserves_parent_export

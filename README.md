@@ -18,6 +18,7 @@ Quando habilitada, exporta traces via OTLP HTTP/protobuf. Metricas e exporters d
 - O processor oficial reinicia sua fila/thread depois de fork; ha teste local de filho e pai. Nao ha Resque ou Sidekiq no bundle e nao ha validacao desses frameworks ou de todas as configuracoes Puma.
 - Nao duplique a instrumentacao com outro agente/provider no mesmo processo. Veja [`lib/reference_telemetry.rb`](lib/reference_telemetry.rb) para a implementacao efetiva.
 - A chamada interna usa loopback e `PORT` (3000 por padrao), nunca o header Host da requisicao. `INTERNAL_PING_URL` permite configurar um destino confiavel explicitamente.
+- O exporter OTLP fica fixado em `0.37.0` no Gemfile/lockfile. O adaptador rejeita outra versao ou assinatura privada incompatível, deixando a app continuar sem exportacao; upgrades exigem atualizar o guard e repetir os testes. A CI usa `BUNDLE_FROZEN=true`.
 
 Teste isolado do provider global (collector local, fila saturada, fork e contexto):
 `bundle exec ruby test/telemetry_smoke.rb`. Execute os testes Rails em outro processo com `bin/rails test`.
