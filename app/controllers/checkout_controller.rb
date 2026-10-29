@@ -40,7 +40,7 @@ class CheckoutController < ApplicationController
   end
 
   def internal_ping_url
-    "#{request.protocol}#{request.host_with_port}/internal/ping"
+    ENV.fetch("INTERNAL_PING_URL", "http://127.0.0.1:#{ENV.fetch('PORT', 3000)}/internal/ping")
   end
 
   def current_trace_id

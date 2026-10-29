@@ -5,6 +5,9 @@ on:
   push:
     branches: [ main ]
 
+env:
+  BUNDLE_FROZEN: "true"
+
 jobs:
   scan_ruby:
     runs-on: ubuntu-latest
@@ -81,6 +84,9 @@ jobs:
         with:
           bundler-cache: true
 
+      - name: Exercise telemetry with local healthy and failing collectors
+        run: bundle exec ruby test/telemetry_smoke.rb
+
       - name: Run tests
         env:
           RAILS_ENV: test
@@ -88,3 +94,9 @@ jobs:
           # RAILS_MASTER_KEY: ${{ secrets.RAILS_MASTER_KEY }}
           # REDIS_URL: redis://localhost:6379/0
         run: bin/rails db:test:prepare test
+
+      - name: Verify real Rails export against a loopback collector
+        env:
+          RAILS_ENV: test
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432
+        run: bundle exec ruby test/collector_consumer.rb
