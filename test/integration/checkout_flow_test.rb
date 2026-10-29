@@ -11,11 +11,13 @@ class CheckoutFlowTest < ActionDispatch::IntegrationTest
   test "POST /checkout returns success, persists order, and runs outbound HTTP call" do
     outbound_called = false
     requested_path = nil
+    requested_host = nil
     mock_response = Struct.new(:code, :body).new("200", "{\"message\":\"pong\"}")
 
     with_stubbed_get_response(->(uri) do
       outbound_called = true
       requested_path = uri.path
+      requested_host = uri.host
       mock_response
     end) do
       post "/checkout",
@@ -29,6 +31,7 @@ class CheckoutFlowTest < ActionDispatch::IntegrationTest
     assert_response :success
     assert outbound_called
     assert_equal "/internal/ping", requested_path
+    assert_equal "127.0.0.1", requested_host
     assert_equal 1, Order.count
     assert_equal "completed", Order.last.status
 

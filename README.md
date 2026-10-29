@@ -2,7 +2,25 @@
 
 Aplicação de exemplo em **Rails API + PostgreSQL** para ensinar, na prática, como instrumentar **somente traces** com OpenTelemetry no Ruby.
 
-Esta app **sempre exporta traces para um collector externo** (via OTLP HTTP/protobuf) e deixa métricas/logs fora do escopo.
+Aplicacao de referencia sobre os SDKs oficiais OpenTelemetry, nao um SDK Ruby Elven publicado separadamente.
+Documentacao autoritativa: [docs.elven.works](https://docs.elven.works/).
+Fonte da documentacao e correcoes: [elvenworks-ps/docs.elven.works](https://github.com/elvenworks-ps/docs.elven.works).
+
+Quando habilitada, exporta traces via OTLP HTTP/protobuf. Metricas e exporters de logs estao fora do escopo.
+
+## Seguranca e ciclo de vida
+
+- `OTEL_SDK_DISABLED=true` ou `OTEL_TRACES_EXPORTER=none`, com reinicio, impede a criacao do exporter e da fila. Rollback: restaure o commit/lockfile anterior e reinicie.
+- Erros de configuracao de telemetria nao impedem o boot da app; falhas de banco e erros de negocio continuam sendo erros reais.
+- Fila limitada a 256 spans, lotes de 64, valores de atributos limitados a 256 caracteres, timeouts de I/O de 2 s e prazo de shutdown de 3 s. O exporter faz uma tentativa sem retry: o backoff do OTLP 0.37.0 pode ultrapassar o timeout. Sob saturacao ha descarte, nao entrega garantida. O prazo configurado nao e um teto absoluto de tempo de parede sob todas as condicoes de runtime/rede.
+- O exporter copia os spans e permite somente atributos operacionais. SQL, URLs, headers, eventos de excecao, links e descricoes de erro nao sao exportados; nomes desconhecidos viram `application.operation`. Nao e uma garantia universal de ausencia de PII, inclusive nos logs da app.
+- Coletores remotos exigem HTTPS e verificacao TLS. HTTP e permitido somente em loopback. Nao coloque credenciais na URL.
+- O processor oficial reinicia sua fila/thread depois de fork; ha teste local de filho e pai. Nao ha Resque ou Sidekiq no bundle e nao ha validacao desses frameworks ou de todas as configuracoes Puma.
+- Nao duplique a instrumentacao com outro agente/provider no mesmo processo. Veja [`lib/reference_telemetry.rb`](lib/reference_telemetry.rb) para a implementacao efetiva.
+- A chamada interna usa loopback e `PORT` (3000 por padrao), nunca o header Host da requisicao. `INTERNAL_PING_URL` permite configurar um destino confiavel explicitamente.
+
+Teste isolado do provider global (collector local, fila saturada, fork e contexto):
+`bundle exec ruby test/telemetry_smoke.rb`. Execute os testes Rails em outro processo com `bin/rails test`.
 
 ## Objetivo de ensino
 
@@ -16,14 +34,15 @@ Ao final deste README, você deve conseguir:
 
 ## Stack e versões usadas
 
-- Ruby `3.3.x`
-- Rails `8.1.2`
-- pg `1.6.3`
-- opentelemetry-api `1.7.0`
-- opentelemetry-sdk `1.10.0`
-- opentelemetry-exporter-otlp `0.31.1`
-- opentelemetry-instrumentation-rails `0.39.1`
-- opentelemetry-instrumentation-net_http `0.27.0`
+- Ruby `3.3.13` (sem migracao de major; testes locais tambem em `3.3.12`)
+- Rails `8.1.4`
+- pg `1.7.0`
+- Puma `~> 7.2` (sem migracao para a major 8)
+- opentelemetry-api `1.11.1`
+- opentelemetry-sdk `1.13.1`
+- opentelemetry-exporter-otlp `0.37.0`
+- opentelemetry-instrumentation-rails `0.42.0`
+- opentelemetry-instrumentation-net_http `0.29.2`
 
 ## O cenário que esta demo cobre
 
@@ -76,42 +95,19 @@ POST /checkout
 ### 1) Gemfile (dependências de tracing)
 
 ```ruby
-gem "opentelemetry-api", "1.7.0"
-gem "opentelemetry-sdk", "1.10.0"
-gem "opentelemetry-exporter-otlp", "0.31.1"
-gem "opentelemetry-instrumentation-rails", "0.39.1"
-gem "opentelemetry-instrumentation-net_http", "0.27.0"
+gem "opentelemetry-api", "1.11.1"
+gem "opentelemetry-sdk", "1.13.1"
+gem "opentelemetry-exporter-otlp", "0.37.0"
+gem "opentelemetry-instrumentation-rails", "0.42.0"
+gem "opentelemetry-instrumentation-net_http", "0.29.2"
 ```
 
 ### 2) Initializer do OpenTelemetry
 
 ```ruby
 # config/initializers/opentelemetry.rb
-require "opentelemetry/sdk"
-require "opentelemetry/exporter/otlp"
-require "opentelemetry/instrumentation/rails"
-require "opentelemetry/instrumentation/net/http"
-
-otel_headers = ENV["OTEL_EXPORTER_OTLP_HEADERS"]
-otel_headers = {} if otel_headers.nil? || otel_headers.strip.empty?
-
-exporter = OpenTelemetry::Exporter::OTLP::Exporter.new(
-  endpoint: ENV.fetch("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://localhost:4318/v1/traces"),
-  headers: otel_headers
-)
-
-resource = OpenTelemetry::SDK::Resources::Resource.create(
-  "deployment.environment" => ENV.fetch("OTEL_DEPLOYMENT_ENVIRONMENT", Rails.env.to_s)
-)
-
-OpenTelemetry::SDK.configure do |c|
-  c.service_name = ENV.fetch("OTEL_SERVICE_NAME", "ruby-rails-traces-demo")
-  c.resource = resource
-  c.add_span_processor(OpenTelemetry::SDK::Trace::Export::BatchSpanProcessor.new(exporter))
-
-  c.use "OpenTelemetry::Instrumentation::Rails"
-  c.use "OpenTelemetry::Instrumentation::Net::HTTP"
-end
+require_relative "../../lib/reference_telemetry"
+ReferenceTelemetry.start(environment: ENV.fetch("OTEL_DEPLOYMENT_ENVIRONMENT", Rails.env.to_s))
 ```
 
 ### 3) Span manual no controller (incluindo erro e trace_id)

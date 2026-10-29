@@ -81,6 +81,9 @@ jobs:
         with:
           bundler-cache: true
 
+      - name: Exercise telemetry with local healthy and failing collectors
+        run: bundle exec ruby test/telemetry_smoke.rb
+
       - name: Run tests
         env:
           RAILS_ENV: test
