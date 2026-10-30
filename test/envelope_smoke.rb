@@ -174,7 +174,9 @@ class EnvelopeTest < Minitest::Test
 
   def test_all_metadata_backing_is_detached
     [ false, true ].each do |bounded|
-      data, roots = metadata_with_borrowed_roots(bounded)
+      # Release the caller's native/VM stack before testing queue ownership;
+      # conservative GC can otherwise retain dead input temporaries on Linux.
+      data, roots = Thread.new { metadata_with_borrowed_roots(bounded) }.value
       3.times { GC.start(full_mark: true, immediate_sweep: true) }
       alive = roots.count(&:weakref_alive?)
       if bounded
