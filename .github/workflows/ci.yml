@@ -55,6 +55,10 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: ['3.3.13', '4.0.9']
 
     services:
       postgres:
@@ -82,10 +86,14 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
+          ruby-version: '${{ matrix.ruby }}'
           bundler-cache: true
 
       - name: Exercise telemetry with local healthy and failing collectors
         run: bundle exec ruby test/telemetry_smoke.rb
+
+      - name: Verify detached prequeue envelopes and physical backing storage
+        run: bundle exec ruby test/envelope_smoke.rb
 
       - name: Run tests
         env:
