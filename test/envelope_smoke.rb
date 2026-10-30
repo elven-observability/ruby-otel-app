@@ -152,10 +152,9 @@ class EnvelopeTest < Minitest::Test
   end
 
   def metadata_with_borrowed_roots(bounded)
-    roots = []
+    parent = ("p" * (1 << 20)).freeze
+    roots = [ WeakRef.new(parent) ]
     tail = lambda do
-      parent = ("p" * (1 << 20)).freeze
-      roots << WeakRef.new(parent)
       parent.byteslice(-128, 128)
     end
     input = fixture
@@ -182,8 +181,7 @@ class EnvelopeTest < Minitest::Test
       if bounded
         assert_equal 0, alive
       else
-        # Native Hash key handling may already detach some small keys.
-        assert_operator alive, :>=, 8
+        assert_equal 1, alive
       end
       assert_equal 128, data.name.bytesize
       assert_equal 128, data.instrumentation_scope.name.bytesize
