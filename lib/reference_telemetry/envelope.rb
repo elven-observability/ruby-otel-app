@@ -2,8 +2,8 @@
 
 module ReferenceTelemetry
   # Application-local qualification of SDK 1.13.1's processor -> BSP contract.
-  # Span#to_span_data is documented for processors but marked @api private;
-  # keep the exact SDK/API pins and contract tests when updating dependencies.
+  # The SDK supplies SpanData through its public exporter interface; the helper
+  # does not call or override the private-annotated Span conversion method.
   class Envelope
     LIMIT = 32 * 1024
     SDK_VERSION = "1.13.1"
@@ -198,6 +198,7 @@ module ReferenceTelemetry
       @next = next_processor
       @rejected_count = 0
       @closed = false
+      @conversion = OpenTelemetry::SDK::Trace::Export::SimpleSpanProcessor.new(self)
     end
 
     def on_start(_span, _parent_context); end
@@ -205,14 +206,22 @@ module ReferenceTelemetry
     def on_finish(span)
       return if @closed
 
-      input = span.to_span_data
-      return unless input.trace_flags.sampled?
+      @conversion.on_finish(span)
+    end
 
-      data = Envelope.new.snapshot(input)
-      @next.on_finish(QueueItem.new(data))
-    rescue StandardError
-      @rejected_count += 1 if @rejected_count < (2**63) - 1
-      nil
+    # This exporter performs admission only: no network I/O on Span#finish.
+    def export(spans, timeout: nil)
+      return OpenTelemetry::SDK::Trace::Export::SUCCESS if @closed
+
+      spans.each do |input|
+        next unless input.trace_flags.sampled?
+
+        data = Envelope.new.snapshot(input)
+        @next.on_finish(QueueItem.new(data))
+      rescue StandardError
+        @rejected_count += 1 if @rejected_count < (2**63) - 1
+      end
+      OpenTelemetry::SDK::Trace::Export::SUCCESS
     end
 
     def force_flush(timeout: nil)

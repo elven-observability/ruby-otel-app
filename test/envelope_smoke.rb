@@ -93,7 +93,7 @@ class EnvelopeTest < Minitest::Test
       change.call(data)
       downstream = Capture.new
       processor = ReferenceTelemetry::EnvelopeProcessor.new(downstream)
-      assert_nil processor.on_finish(Struct.new(:to_span_data).new(data)), name.to_s
+      assert_equal 0, processor.export([ data ]), name.to_s
       assert_empty downstream.items, name.to_s
       assert_equal 1, processor.rejected_count, name.to_s
     end

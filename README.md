@@ -27,7 +27,7 @@ Teste isolado do provider global (collector local, fila saturada, fork e context
 
 Teste adicional: `bundle exec ruby test/envelope_smoke.rb`, incluindo GC, capacidade reservada e views pequenas de sufixo. Strings sao copiadas para buffer novo de tamanho limitado, nao `dup`/COW; a fila recebe somente SpanData/contexto destacados, sem delegate para o span original.
 
-O adaptador e qualificado para API 1.11.1/SDK 1.13.1 exatos. `Span#to_span_data` e documentado pelo SDK para processors antes de exporters, mas marcado `@api private`; a forma dos itens lidos pelo BSP tambem exige revisao ao atualizar SDK. Guard, pins exatos e testes de contrato impedem aceitar silenciosamente uma versao diferente. Isso nao e um novo SDK publicado nem uma fila propria.
+O adaptador e qualificado para API 1.11.1/SDK 1.13.1 exatos. O `SimpleSpanProcessor` oficial entrega SpanData pela interface publica de exporter ao guard, somente em memoria e sem I/O no thread da app. O helper nao chama nem sobrescreve a conversao de Span marcada `@api private`. A forma dos itens lidos pelo BSP exige revisao ao atualizar SDK; guard, pins exatos e testes de contrato impedem aceitar silenciosamente uma versao diferente. Isso nao e um novo SDK publicado nem uma fila propria.
 
 O budget limita dados admitidos na fila do helper, nao RSS, spans ativos, caches globais, providers externos ou alocacoes anteriores ao processor. R-Q1/R-Q2/R-Q3/R-Q4 sao falhas reproduzidas do baseline, nao garantias universais sobre todos os Strings/runtimes. Ha descarte por sobrecarga e custo de copia; nao ha promessa de overhead zero. A candidata exige CI em Ruby 3.3.13/4.0.9 e revisao independente. Docker/Linux ARM64 desta revisao aguarda liberacao do ambiente compartilhado.
 
