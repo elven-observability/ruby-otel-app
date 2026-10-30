@@ -67,21 +67,35 @@ module ReferenceTelemetry
       require "opentelemetry/sdk"
       require "opentelemetry/exporter/otlp"
       require_relative "reference_telemetry/exporter"
+      require_relative "reference_telemetry/envelope"
       require "opentelemetry/instrumentation/rails"
       require "opentelemetry/instrumentation/net/http"
+
+      Envelope.validate_versions!
+      %w[OTEL_SERVICE_NAME OTEL_RESOURCE_ATTRIBUTES].each do |key|
+        raise Envelope::Rejected if ENV[key]&.bytesize.to_i > Envelope::LIMIT
+      end
+      effective_resource = Envelope.new.resource(
+        OpenTelemetry::SDK::Resources::Resource.default.merge(
+          OpenTelemetry::SDK::Resources::Resource.create(
+            "service.name" => ENV.fetch("OTEL_SERVICE_NAME", "ruby-rails-traces-demo"),
+            "deployment.environment" => environment
+          )
+        )
+      )
 
       exporter = Exporter.new(
         endpoint: endpoint, timeout: EXPORT_TIMEOUT, ssl_verify_mode: OpenSSL::SSL::VERIFY_PEER
       )
-      processor = OpenTelemetry::SDK::Trace::Export::BatchSpanProcessor.new(
+      batcher = OpenTelemetry::SDK::Trace::Export::BatchSpanProcessor.new(
         PrivateExporter.new(exporter), max_queue_size: QUEUE_SIZE, max_export_batch_size: BATCH_SIZE,
-        exporter_timeout: EXPORT_TIMEOUT * 1000, schedule_delay: 1000, start_thread_on_boot: false
+        exporter_timeout: EXPORT_TIMEOUT * 1000, schedule_delay: 1000, start_thread_on_boot: true
       )
+      processor = EnvelopeProcessor.new(batcher)
       OpenTelemetry::SDK.configure do |c|
         c.logger = Logger.new(File::NULL)
         c.error_handler = ->(**) { nil }
-        c.service_name = ENV.fetch("OTEL_SERVICE_NAME", "ruby-rails-traces-demo")
-        c.resource = OpenTelemetry::SDK::Resources::Resource.create("deployment.environment" => environment)
+        c.resource = effective_resource
         c.add_span_processor(processor)
         c.use "OpenTelemetry::Instrumentation::Rails"
         c.use "OpenTelemetry::Instrumentation::Rack"
@@ -99,7 +113,7 @@ module ReferenceTelemetry
       true
     rescue StandardError, LoadError
       begin
-        processor&.shutdown(timeout: SHUTDOWN_TIMEOUT)
+        (processor || batcher)&.shutdown(timeout: SHUTDOWN_TIMEOUT)
       rescue StandardError
         nil
       end

@@ -16,14 +16,20 @@ Quando habilitada, exporta traces via OTLP HTTP/protobuf. Metricas e exporters d
 - O exporter copia os spans e permite somente atributos operacionais. SQL, URLs, headers, eventos de excecao, links e descricoes de erro nao sao exportados; nomes desconhecidos viram `application.operation`. Nao e uma garantia universal de ausencia de PII, inclusive nos logs da app.
 - Coletores remotos exigem HTTPS e verificacao TLS. HTTP e permitido somente em loopback. Nao coloque credenciais na URL.
 - O processor oficial reinicia sua fila/thread depois de fork; ha teste local de filho e pai. Nao ha Resque ou Sidekiq no bundle e nao ha validacao desses frameworks ou de todas as configuracoes Puma.
-- Limitacao aberta: `start_thread_on_boot:false` nao cria o worker BSP no processo que inicializa o helper. Os controles de exportacao usam flush/shutdown ou fork posterior; exportacao periodica nesse processo nao esta qualificada. Atualizar o runtime nao corrige esse comportamento.
-- A fila tem limite de quantidade, nao um budget agregado do envelope antes do BSP. Metadados, scope/resource e traceState grandes ainda exigem revisao; sanitizacao no exporter ocorre depois da fila.
+- Historico R-Q0 do baseline `b3fae32`: `start_thread_on_boot:false` impedia autoexport no processo inicial; flush/fork nao encerravam essa falha. A candidata usa a opcao publica `start_thread_on_boot:true` do BSP 1.13.1 e acrescenta teste real do primeiro span sem flush nem fork. A qualificacao da candidata e separada dos controles historicos abaixo.
+- A candidata adiciona snapshot antes do BSP oficial: budget agregado de dados de 32 KiB por span, com cobrancas por campos/containers, cobrindo nome, atributos/keys/arrays, status, eventos, links, contextos, resource e scope. Envelope excessivo ou traceState invalido/multilinha e descartado antes da fila, sem impedir o trabalho da app. A redacao posterior no exporter permanece.
 - Nao duplique a instrumentacao com outro agente/provider no mesmo processo. Veja [`lib/reference_telemetry.rb`](lib/reference_telemetry.rb) para a implementacao efetiva.
 - A chamada interna usa loopback e `PORT` (3000 por padrao), nunca o header Host da requisicao. `INTERNAL_PING_URL` permite configurar um destino confiavel explicitamente.
 - O exporter OTLP fica fixado em `0.37.0` no Gemfile/lockfile. O adaptador rejeita outra versao ou assinatura privada incompatível, deixando a app continuar sem exportacao; upgrades exigem atualizar o guard e repetir os testes. A CI usa `BUNDLE_FROZEN=true`.
 
 Teste isolado do provider global (collector local, fila saturada, fork e contexto):
 `bundle exec ruby test/telemetry_smoke.rb`. Execute os testes Rails em outro processo com `bin/rails test`.
+
+Teste adicional: `bundle exec ruby test/envelope_smoke.rb`, incluindo GC, capacidade reservada e views pequenas de sufixo. Strings sao copiadas para buffer novo de tamanho limitado, nao `dup`/COW; a fila recebe somente SpanData/contexto destacados, sem delegate para o span original.
+
+O adaptador e qualificado para API 1.11.1/SDK 1.13.1 exatos. `Span#to_span_data` e documentado pelo SDK para processors antes de exporters, mas marcado `@api private`; a forma dos itens lidos pelo BSP tambem exige revisao ao atualizar SDK. Guard, pins exatos e testes de contrato impedem aceitar silenciosamente uma versao diferente. Isso nao e um novo SDK publicado nem uma fila propria.
+
+O budget limita dados admitidos na fila do helper, nao RSS, spans ativos, caches globais, providers externos ou alocacoes anteriores ao processor. R-Q1/R-Q2/R-Q3/R-Q4 sao falhas reproduzidas do baseline, nao garantias universais sobre todos os Strings/runtimes. Ha descarte por sobrecarga e custo de copia; nao ha promessa de overhead zero. A candidata exige CI em Ruby 3.3.13/4.0.9 e revisao independente. Docker/Linux ARM64 desta revisao aguarda liberacao do ambiente compartilhado.
 
 ## Objetivo de ensino
 
@@ -51,7 +57,7 @@ Ao final deste README, você deve conseguir:
 
 As [versoes oficiais de 23/10/2026](https://www.ruby-lang.org/en/downloads/releases/) sao Ruby 4.0.9, 3.4.12 e 3.3.13. Ruby 3.3 recebe correcoes de seguranca; Ruby 3.2 esta EOL. Os controles antigos em 3.3.12 sao historicos, nao uma qualificacao de seguranca atual.
 
-Ruby 3.3.13 e 4.0.9 foram executados em Linux/ARM64 com o mesmo `Gemfile.lock` congelado: 14 testes de telemetry/59 assertions, 4 testes Rails/20 assertions e consumer HTTP real com Rack, ActiveRecord e Net::HTTP contra collector local. Contexto, fork, falha/backpressure e guard do exporter fazem parte do controle isolado. Esse resultado nao fecha a limitacao de worker acima, nem qualifica todas as configuracoes Puma, outros SOs ou o Dockerfile final de producao.
+O baseline `b3fae32` foi executado em Ruby 3.3.13 e 4.0.9 Linux/ARM64 com o mesmo `Gemfile.lock` congelado: 14 testes de telemetry/59 assertions, 4 testes Rails/20 assertions e consumer HTTP real com Rack, ActiveRecord e Net::HTTP contra collector local. Contexto, fork, falha/backpressure e guard do exporter fazem parte desse controle historico. Esse resultado nao fechava R-Q0 e nao qualifica automaticamente os novos processors, todas as configuracoes Puma, outros SOs ou o Dockerfile final de producao.
 
 Para optar por Ruby 4.0.9, instale esse runtime em ambiente isolado e reinstale o bundle com Bundler 2.7.1 e `BUNDLE_FROZEN=true`; nao reutilize extensoes nativas compiladas para Ruby 3.3. Nao foi necessaria mudanca de sintaxe, API ou lockfile nos controles. O default do Dockerfile continua 3.3.13; o argumento `RUBY_VERSION` permite testar a outra linha explicitamente. A CI testa ambas sem abandonar a linha anterior.
 

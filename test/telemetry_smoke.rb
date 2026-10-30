@@ -97,7 +97,8 @@ class ReferenceTelemetryTest < Minitest::Test
     ENV["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] = "https://127.0.0.1:4318/v1/traces"
     assert ReferenceTelemetry.start
     processor = OpenTelemetry.tracer_provider.instance_variable_get(:@span_processors).first
-    exporter = processor.instance_variable_get(:@exporter).instance_variable_get(:@exporter)
+    batcher = processor.instance_variable_get(:@next)
+    exporter = batcher.instance_variable_get(:@exporter).instance_variable_get(:@exporter)
     assert_equal OpenSSL::SSL::VERIFY_PEER, exporter.instance_variable_get(:@http).verify_mode
   end
 
@@ -124,7 +125,8 @@ class ReferenceTelemetryTest < Minitest::Test
     retained = GC.stat(:heap_live_slots) - before
     provider = OpenTelemetry.tracer_provider
     processor = provider.instance_variable_get(:@span_processors).first
-    assert_operator processor.instance_variable_get(:@spans).size, :<=, ReferenceTelemetry::QUEUE_SIZE
+    batcher = processor.instance_variable_get(:@next)
+    assert_operator batcher.instance_variable_get(:@spans).size, :<=, ReferenceTelemetry::QUEUE_SIZE
     assert_operator retained, :<, 100_000
     ReferenceTelemetry.shutdown
     assert_operator @requests, :<, 100
@@ -151,6 +153,55 @@ class ReferenceTelemetryTest < Minitest::Test
     assert_equal "0.37.0", locked.version.to_s
     assert_equal "0.37.0", Gem.loaded_specs.fetch("opentelemetry-exporter-otlp").version.to_s
     assert_nil ReferenceTelemetry::Exporter.validate_upstream!
+  end
+
+  def test_initial_span_automatically_exports_without_flush_or_fork
+    assert ReferenceTelemetry.start
+    tracer.in_span("checkout.finalize") { 42 }
+    bytes = Timeout.timeout(4) { @bodies.pop }
+    decoded = Opentelemetry::Proto::Collector::Trace::V1::ExportTraceServiceRequest.decode(bytes)
+    spans = decoded.resource_spans.flat_map(&:scope_spans).flat_map(&:spans)
+    assert_equal [ "checkout.finalize" ], spans.map(&:name)
+    assert_equal 1, @requests
+  end
+
+  def test_snapshot_contract_change_fails_open_before_network
+    require_relative "../lib/reference_telemetry/envelope"
+    original = ReferenceTelemetry::Envelope.method(:validate_versions!)
+    singleton = ReferenceTelemetry::Envelope.singleton_class
+    singleton.define_method(:validate_versions!) do
+      original.call("1.14.0", "1.11.1")
+    end
+    _out, error = capture_io { refute ReferenceTelemetry.start }
+    assert_includes error, "application continues"
+    assert_equal 0, @requests
+    refute OpenTelemetry::Trace.current_span.recording?
+  ensure
+    singleton.define_method(:validate_versions!, original) if original
+  end
+
+  def test_oversized_envelopes_and_multiline_state_never_reach_collector
+    assert ReferenceTelemetry.start
+    tracer.in_span("n" * (1 << 20)) { nil }
+    tracer.in_span("event") { |span| span.add_event("e" * (1 << 20)) }
+    tracer.in_span("n" * 12_000, attributes: { "k" * 12_000 => "value" }) do |span|
+      span.add_event("e" * 12_000)
+    end
+    state = OpenTelemetry::Trace::Tracestate.from_hash("tenant" => "valid\n" + ("x" * (1 << 20)))
+    refute state.empty?
+    remote = OpenTelemetry::Trace::SpanContext.new(
+      trace_id: "t" * 16, span_id: "s" * 8,
+      trace_flags: OpenTelemetry::Trace::TraceFlags::SAMPLED, tracestate: state, remote: true
+    )
+    parent = OpenTelemetry::Trace.context_with_span(OpenTelemetry::Trace::Span.new(span_context: remote))
+    OpenTelemetry::Context.with_current(parent) { tracer.in_span("checkout.finalize") { nil } }
+    tracer.in_span("checkout.finalize") { nil }
+    assert_equal 0, OpenTelemetry.tracer_provider.force_flush(timeout: 3)
+    decoded = Opentelemetry::Proto::Collector::Trace::V1::ExportTraceServiceRequest.decode(Timeout.timeout(3) { @bodies.pop })
+    spans = decoded.resource_spans.flat_map(&:scope_spans).flat_map(&:spans)
+    assert_equal [ "checkout.finalize" ], spans.map(&:name)
+    processor = OpenTelemetry.tracer_provider.instance_variable_get(:@span_processors).first
+    assert_equal 4, processor.rejected_count
   end
 
   def test_unsupported_exporter_version_is_rejected
