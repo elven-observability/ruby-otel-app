@@ -16,6 +16,8 @@ Quando habilitada, exporta traces via OTLP HTTP/protobuf. Metricas e exporters d
 - O exporter copia os spans e permite somente atributos operacionais. SQL, URLs, headers, eventos de excecao, links e descricoes de erro nao sao exportados; nomes desconhecidos viram `application.operation`. Nao e uma garantia universal de ausencia de PII, inclusive nos logs da app.
 - Coletores remotos exigem HTTPS e verificacao TLS. HTTP e permitido somente em loopback. Nao coloque credenciais na URL.
 - O processor oficial reinicia sua fila/thread depois de fork; ha teste local de filho e pai. Nao ha Resque ou Sidekiq no bundle e nao ha validacao desses frameworks ou de todas as configuracoes Puma.
+- Limitacao aberta: `start_thread_on_boot:false` nao cria o worker BSP no processo que inicializa o helper. Os controles de exportacao usam flush/shutdown ou fork posterior; exportacao periodica nesse processo nao esta qualificada. Atualizar o runtime nao corrige esse comportamento.
+- A fila tem limite de quantidade, nao um budget agregado do envelope antes do BSP. Metadados, scope/resource e traceState grandes ainda exigem revisao; sanitizacao no exporter ocorre depois da fila.
 - Nao duplique a instrumentacao com outro agente/provider no mesmo processo. Veja [`lib/reference_telemetry.rb`](lib/reference_telemetry.rb) para a implementacao efetiva.
 - A chamada interna usa loopback e `PORT` (3000 por padrao), nunca o header Host da requisicao. `INTERNAL_PING_URL` permite configurar um destino confiavel explicitamente.
 - O exporter OTLP fica fixado em `0.37.0` no Gemfile/lockfile. O adaptador rejeita outra versao ou assinatura privada incompatível, deixando a app continuar sem exportacao; upgrades exigem atualizar o guard e repetir os testes. A CI usa `BUNDLE_FROZEN=true`.
@@ -35,7 +37,7 @@ Ao final deste README, você deve conseguir:
 
 ## Stack e versões usadas
 
-- Ruby `3.3.13` (sem migracao de major; testes locais tambem em `3.3.12`)
+- Ruby `3.3.13` por padrao; perfil opcional `4.0.9`, sem mudar `.ruby-version` ou pins do bundle
 - Rails `8.1.4`
 - pg `1.7.0`
 - Puma `~> 7.2` (sem migracao para a major 8)
@@ -44,6 +46,16 @@ Ao final deste README, você deve conseguir:
 - opentelemetry-exporter-otlp `0.37.0`
 - opentelemetry-instrumentation-rails `0.42.0`
 - opentelemetry-instrumentation-net_http `0.29.2`
+
+### Perfis atuais e migracao opcional
+
+As [versoes oficiais de 23/10/2026](https://www.ruby-lang.org/en/downloads/releases/) sao Ruby 4.0.9, 3.4.12 e 3.3.13. Ruby 3.3 recebe correcoes de seguranca; Ruby 3.2 esta EOL. Os controles antigos em 3.3.12 sao historicos, nao uma qualificacao de seguranca atual.
+
+Ruby 3.3.13 e 4.0.9 foram executados em Linux/ARM64 com o mesmo `Gemfile.lock` congelado: 14 testes de telemetry/59 assertions, 4 testes Rails/20 assertions e consumer HTTP real com Rack, ActiveRecord e Net::HTTP contra collector local. Contexto, fork, falha/backpressure e guard do exporter fazem parte do controle isolado. Esse resultado nao fecha a limitacao de worker acima, nem qualifica todas as configuracoes Puma, outros SOs ou o Dockerfile final de producao.
+
+Para optar por Ruby 4.0.9, instale esse runtime em ambiente isolado e reinstale o bundle com Bundler 2.7.1 e `BUNDLE_FROZEN=true`; nao reutilize extensoes nativas compiladas para Ruby 3.3. Nao foi necessaria mudanca de sintaxe, API ou lockfile nos controles. O default do Dockerfile continua 3.3.13; o argumento `RUBY_VERSION` permite testar a outra linha explicitamente. A CI testa ambas sem abandonar a linha anterior.
+
+Audite runtime/stdlib separadamente dos gems do lockfile. As correcoes de [compilacao Regexp](https://www.ruby-lang.org/en/news/2026/10/23/regexp-fixes-for-gitlab-cves/) nao sao substituidas por `Regexp.timeout`; o bootstrap nao expoe compilacao de padroes controlados pelo usuario. Os runtimes testados carregaram `resolv` 0.3.2/0.7.2, respectivamente, corrigindo os [advisories da biblioteca](https://www.ruby-lang.org/en/news/2026/08/27/multiple-vulnerabilities-in-resolv/). Carregar a biblioteca nao prova uso de seu resolver; `Net::HTTP` ordinario usa o resolver do SO. Nao ha garantia universal de ausencia de CVEs ou PII.
 
 ## O cenário que esta demo cobre
 
