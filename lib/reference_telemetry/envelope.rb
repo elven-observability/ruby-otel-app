@@ -35,13 +35,14 @@ module ReferenceTelemetry
 
     def string(value, binary: false, size: nil)
       raise Rejected unless value.instance_of?(String)
-      raise Rejected if size && value.bytesize != size
-      raise Rejected if !binary && !value.valid_encoding?
+      bytes = value.bytesize
+      raise Rejected if size && bytes != size
 
-      charge(64 + value.bytesize)
+      charge(64 + bytes)
+      raise Rejected if !binary && !value.valid_encoding?
       # dup/String.new(value) can retain the original shared string root.
       # Appending into a fresh, bounded buffer copies the actual bytes.
-      String.new(capacity: value.bytesize, encoding: value.encoding).concat(value).freeze
+      String.new(capacity: bytes, encoding: value.encoding).concat(value).freeze
     end
 
     def scalar(value)

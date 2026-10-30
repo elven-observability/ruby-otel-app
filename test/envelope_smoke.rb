@@ -143,6 +143,51 @@ class EnvelopeTest < Minitest::Test
     end
   end
 
+  def encoding_checks_for(value)
+    calls = 0
+    observer = TracePoint.new(:c_call) do |event|
+      calls += 1 if event.method_id == :valid_encoding? && event.self.equal?(value)
+    end
+    observer.enable { yield }
+    calls
+  ensure
+    observer&.disable
+  end
+
+  def test_byte_admission_precedes_encoding_scan
+    oversized = "\u00e9" * ReferenceTelemetry::Envelope::LIMIT
+    budget = ReferenceTelemetry::Envelope.new
+    assert_equal 0, encoding_checks_for(oversized) {
+      assert_raises(ReferenceTelemetry::Envelope::Rejected) { budget.string(oversized) }
+    }
+    assert_equal 0, budget.used
+
+    budget.charge(ReferenceTelemetry::Envelope::LIMIT - 128)
+    exceeds_remaining_with_header = "x" * 65
+    assert_equal 0, encoding_checks_for(exceeds_remaining_with_header) {
+      assert_raises(ReferenceTelemetry::Envelope::Rejected) { budget.string(exceeds_remaining_with_header) }
+    }
+    assert_equal ReferenceTelemetry::Envelope::LIMIT - 128, budget.used
+  end
+
+  def test_admitted_unicode_and_invalid_encoding_still_validate
+    unicode = "\u00e9\u6f22"
+    copy = nil
+    assert_equal 1, encoding_checks_for(unicode) { copy = ReferenceTelemetry::Envelope.new.string(unicode) }
+    assert_equal unicode, copy
+    assert_equal Encoding::UTF_8, copy.encoding
+    assert copy.frozen?
+    refute_same unicode, copy
+
+    invalid = "\xff".b.force_encoding(Encoding::UTF_8)
+    assert_equal 1, encoding_checks_for(invalid) {
+      assert_raises(ReferenceTelemetry::Envelope::Rejected) { ReferenceTelemetry::Envelope.new.string(invalid) }
+    }
+    assert_equal 0, encoding_checks_for(invalid) {
+      assert_equal invalid, ReferenceTelemetry::Envelope.new.string(invalid, binary: true)
+    }
+  end
+
   class BlockedExporter
     attr_reader :entered, :release
     def initialize; @entered = Queue.new; @release = Queue.new; end
@@ -215,7 +260,8 @@ class EnvelopeTest < Minitest::Test
       provider.add_span_processor(processor)
       provider.tracer("blocker").in_span("initial") { nil }
       Timeout.timeout(3) { exporter.entered.pop }
-      roots = enqueue_roots(processor, mode)
+      # Exclude dead producer-stack temporaries, as in the metadata control.
+      roots = Thread.new { enqueue_roots(processor, mode) }.value
       3.times { GC.start(full_mark: true, immediate_sweep: true) }
       assert_equal bounded ? 0 : 8, roots.count(&:weakref_alive?), "source roots: #{mode}"
       queued = batcher.instance_variable_get(:@spans)
