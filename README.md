@@ -51,8 +51,8 @@ Ao final deste README, você deve conseguir:
 
 ## Stack e versões usadas
 
-- Ruby `3.3.13` por padrao; perfil opcional `4.0.9`, sem mudar `.ruby-version` ou pins do bundle
-- Rails `8.1.4`
+- Ruby `3.3.14` por padrao; perfil opcional `4.0.10`, sem mudar os pins do bundle
+- Rails `8.1.4.1` (patch de seguranca; dependencias transitivas registradas no lock)
 - pg `1.7.0`
 - Puma `~> 7.2` (sem migracao para a major 8)
 - opentelemetry-api `1.11.1`
@@ -63,11 +63,11 @@ Ao final deste README, você deve conseguir:
 
 ### Perfis atuais e migracao opcional
 
-As [versoes oficiais de 23/10/2026](https://www.ruby-lang.org/en/downloads/releases/) sao Ruby 4.0.9, 3.4.12 e 3.3.13. Ruby 3.3 recebe correcoes de seguranca; Ruby 3.2 esta EOL. Os controles antigos em 3.3.12 sao historicos, nao uma qualificacao de seguranca atual.
+O [aviso oficial de 18/11/2026](https://www.ruby-lang.org/en/news/2026/11/18/multiple-vulnerabilities-in-regexp-and-string/) recomenda atualizar o interpretador. Esta referencia fixa [Ruby 3.3.14](https://www.ruby-lang.org/en/news/2026/11/18/ruby-3-3-14-released/) e oferece [Ruby 4.0.10](https://www.ruby-lang.org/en/news/2026/11/18/ruby-4-0-10-released/) como perfil opcional. As execucoes abaixo com 3.3.12, 3.3.13 e 4.0.9 sao historicas; nao comprovam seguranca ou compatibilidade dos novos perfis.
 
 O baseline `b3fae32` foi executado em Ruby 3.3.13 e 4.0.9 Linux/ARM64 com o mesmo `Gemfile.lock` congelado: 14 testes de telemetry/59 assertions, 4 testes Rails/20 assertions e consumer HTTP real com Rack, ActiveRecord e Net::HTTP contra collector local. Contexto, fork, falha/backpressure e guard do exporter fazem parte desse controle historico. Esse resultado nao fechava R-Q0 e nao qualifica automaticamente os novos processors, todas as configuracoes Puma, outros SOs ou o Dockerfile final de producao.
 
-Para optar por Ruby 4.0.9, instale esse runtime em ambiente isolado e reinstale o bundle com Bundler 2.7.1 e `BUNDLE_FROZEN=true`; nao reutilize extensoes nativas compiladas para Ruby 3.3. Nao foi necessaria mudanca de sintaxe, API ou lockfile nos controles. O default do Dockerfile continua 3.3.13; o argumento `RUBY_VERSION` permite testar a outra linha explicitamente. A CI testa ambas sem abandonar a linha anterior.
+Para optar por Ruby 4.0.10, instale esse runtime em ambiente isolado e reinstale o bundle com Bundler 2.7.1 e `BUNDLE_FROZEN=true`; nao reutilize extensoes nativas compiladas para Ruby 3.3. O default do Dockerfile e 3.3.14; o argumento `RUBY_VERSION` permite escolher o outro perfil. A matriz de CI solicita as duas versoes, sem alterar o lockfile ou o OpenTelemetry. Uma matriz configurada nao equivale a CI executada nesse commit.
 
 Audite runtime/stdlib separadamente dos gems do lockfile. As correcoes de [compilacao Regexp](https://www.ruby-lang.org/en/news/2026/10/23/regexp-fixes-for-gitlab-cves/) nao sao substituidas por `Regexp.timeout`; o bootstrap nao expoe compilacao de padroes controlados pelo usuario. Os runtimes testados carregaram `resolv` 0.3.2/0.7.2, respectivamente, corrigindo os [advisories da biblioteca](https://www.ruby-lang.org/en/news/2026/08/27/multiple-vulnerabilities-in-resolv/). Carregar a biblioteca nao prova uso de seu resolver; `Net::HTTP` ordinario usa o resolver do SO. Nao ha garantia universal de ausencia de CVEs ou PII.
 
